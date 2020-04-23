@@ -11,11 +11,9 @@ import functools
 import cachetools
 
 import histogram_gap
-from tiff_conversion import load_dark, IMG_MAX
-from interpolate_flats import load_gray_tiff, extract_channel_image, flatten_channel_image
-from interpolate_fixed_flats import get_exposure_matched_flat, display_image, remove_gradient
-from full_image_calibration import load_flats_from_subfolders, load_raw_image, calc_relative_image_noise_level
-
+from tiff_conversion import load_dark
+from interpolate_fixed_flats import display_image, remove_gradient
+from load_flats import load_flats_from_subfolders
 
 # @functools.lru_cache()
 def calc_flat_image_means(flat_images_rgb, proportiontocut = 0.2):
@@ -63,30 +61,38 @@ def get_flat_and_bandingfix_flat(flat_images_rgb, test_img_rgb, flats_progressio
 
 		print('output_channel_flat: ', np.mean(output_channel_flat))
 
-
 		output_flat[channel] = output_channel_flat
 
 	return output_flat
 
-@cachetools.cached(cache={}, key=lambda folder, bias_img: cachetools.keys.hashkey(folder))
+@cachetools.cached(cache={}, key=lambda *args, **kwargs: cachetools.keys.hashkey(args[0]))
 def get_progression_flat_mean(folder, bias_img = None):
 	cache_name = os.path.join(folder, 'mean_frame.tiff')
 	means_cache_name = os.path.join(folder, 'mean_brightnesses.npy')
 
 	image_names = list(map(lambda s2: os.path.join(folder, s2), filter(lambda s: s.endswith('.ARW'), os.listdir(folder))))
+
+	#is this ok in general? probably?
+	def sortKey(s):
+		result = int(s.split(os.path.sep)[-1].strip('DSC').split('.')[-2])
+		if result > 9000: result -= 10000
+		return result
+
+	image_names.sort(key = sortKey)
 	# print(image_names)
 
 	if os.path.exists(cache_name):# and False:
 		sum_image = tiff.imread(cache_name)
 		all_image_means = np.load(means_cache_name)
+		plt.plot(all_image_means)
+		plt.show()
 	else:
 
 		sum_image = None
 		all_image_means = []
 
 		for img_fn in tqdm.tqdm(image_names):
-			# img = histogram_gap.read_raw_correct_hist(img_fn)
-			img = load_raw_image(img_fn, bias_img) / IMG_MAX
+			img = histogram_gap.load_raw_image(img_fn, bias_img)
 			channel_means = np.mean(img, axis=(0,1))
 
 			img = img / channel_means[np.newaxis, np.newaxis, :]
@@ -119,27 +125,46 @@ def listToTuple(function):
 
 # @listToTuple
 # @functools.lru_cache()
-@cachetools.cached(cache={}, key=lambda image_filenames, closest_index, half_images_to_average, channel, bias_img: cachetools.keys.hashkey(tuple(image_filenames), closest_index, half_images_to_average))
+
+
+cache = cachetools.LRUCache(maxsize=32)
+@cachetools.cached(cache=cache, key=lambda image_filenames, closest_index, half_images_to_average, channel, bias_img: cachetools.keys.hashkey(tuple(image_filenames), closest_index, half_images_to_average))
 def load_flat_img(image_filenames, closest_index, half_images_to_average, channel, bias_img):
 	# global bias_img
 
 	if 0:
 		# print(all_flat_channel_means[closest_index], input_channel_mean)
-		flat_image = load_raw_image(image_filenames[closest_index], bias_img) / IMG_MAX
+		flat_image = histogram_gap.load_raw_image(image_filenames[closest_index], bias_img)
 		flat_image_channel = flat_image[:, :, channel]
 	else:
-		flat_image_channel_stack = None
-		for i, image_index in enumerate(range(closest_index - half_images_to_average, closest_index + half_images_to_average+1)):
-			flat_image = load_raw_image(image_filenames[image_index], bias_img) /IMG_MAX
-			flat_image_channel = flat_image[:, :, channel]
+		if 0:
+			flat_image_channel_stack = None
+			for i, image_index in enumerate(range(max(0, closest_index - half_images_to_average), min(len(image_filenames)-1, closest_index + half_images_to_average+1))):
+				flat_image = histogram_gap.load_raw_image(image_filenames[image_index], bias_img)
+				flat_image_channel = flat_image[:, :, channel]
 
-			if flat_image_channel_stack is None:
-				flat_image_channel_stack = np.zeros((2*half_images_to_average+1,) + flat_image_channel.shape, dtype=flat_image_channel.dtype)
+				if flat_image_channel_stack is None:
+					flat_image_channel_stack = np.zeros((2*half_images_to_average+1,) + flat_image_channel.shape, dtype=flat_image_channel.dtype)
 
-			flat_image_channel_stack[i] = flat_image_channel
+				flat_image_channel_stack[i] = flat_image_channel
+		else:
+			flat_image_channel_stack = []
+			for i, image_index in enumerate(range(max(0, closest_index - half_images_to_average), min(len(image_filenames)-1, closest_index + half_images_to_average+1))):
+				flat_image = histogram_gap.load_raw_image(image_filenames[image_index], bias_img)
+				flat_image_channel = flat_image[:, :, channel]
 
+				flat_image_channel_stack.append(flat_image_channel)
+			flat_image_channel_stack = np.array(flat_image_channel_stack)
 
 		#todo: normalize image brightnesses before combining?
+		image_means = np.mean(flat_image_channel_stack, axis=(1,2))
+		# print(image_means)
+		for i in range(flat_image_channel_stack.shape[0]):
+			# normalization_factor = image_means[half_images_to_average] / image_means[i]
+			normalization_factor = image_means[image_means.shape[0]//2] / image_means[i]
+			flat_image_channel_stack[i] *= normalization_factor
+		
+
 		flat_image_channel = np.mean(flat_image_channel_stack, axis=0)
 			# print(flat_image.shape)
 
@@ -154,7 +179,7 @@ def get_flat_matching_brightness(folder, input_channel, channel, half_images_to_
 	all_flat_channel_means = all_image_means[:, channel]
 	closest_index = np.abs(all_flat_channel_means - input_channel_mean).argmin()
 	print('input channel  mean: ', input_channel_mean)
-	print('closest index: ', closest_index, len(all_flat_channel_means))
+	print('closest progression flat index: ', closest_index, len(all_flat_channel_means))
 	# plt.plot(all_flat_channel_means); plt.show()
 
 
@@ -169,21 +194,72 @@ def get_flat_matching_brightness(folder, input_channel, channel, half_images_to_
 	input_channel_mean *= median_ratio
 
 	closest_index = np.abs(all_flat_channel_means - input_channel_mean).argmin()
-	print('closest index: ', closest_index)
+	print('closest progression flat index: ', closest_index, len(all_flat_channel_means))
 	print(all_flat_channel_means[closest_index], input_channel_mean)
-	flat_image = load_flat_img(image_filenames, closest_index, half_images_to_average, channel, bias_img)
+	flat_image_channel = load_flat_img(image_filenames, closest_index, half_images_to_average, channel, bias_img)
 
 	# noise_level = calc_relative_image_noise_level(flat_image_channel)
 	# print('relative noise level of flat: ', noise_level)
 
 	return flat_image_channel
 
+
+def get_flat_matching_brightness_histogram_match(folder, input_channel, channel, half_images_to_average = 3, bias_img = None):
+	overall_mean, all_image_means, image_filenames = get_progression_flat_mean(folder, bias_img = bias_img)
+
+	#todo: mean -> something more outlier resistant
+	input_channel_mean = scipy.stats.trim_mean(input_channel.flatten(), proportiontocut = 0.2)
+
+	all_flat_channel_means = all_image_means[:, channel]
+	closest_index = np.abs(all_flat_channel_means - input_channel_mean).argmin()
+	print('closest progression flat index: ', closest_index, len(all_flat_channel_means))
+
+	flat_image_channel = load_flat_img(image_filenames, closest_index, half_images_to_average, channel, bias_img)
+
+
+	for _ in range(3):
+
+		for peak_range in [0.02, 0.05, 0.1, 0.2]:
+			all_ratios = (input_channel / flat_image_channel).flatten()
+			ratios = all_ratios[np.where(np.abs(all_ratios - 1) < peak_range)]
+			n, bins = np.histogram(ratios, bins = np.linspace(1 - peak_range, 1 + peak_range, 1001))
+
+			bins = (bins[1:] + bins[:-1])/2
+			fit = np.polyfit(bins, n, deg=2)
+			peak = -fit[1] / (2*fit[0])
+			print(peak, fit)
+
+			if np.isnan(peak) and False:
+				plt.imshow(flat_image_channel)
+				plt.show()
+
+				plt.imshow(input_channel)
+				plt.show()
+
+			if np.abs(peak - 1) < peak_range:
+				break
+
+		print('peak value: ', peak)
+
+		input_channel_mean *= peak
+
+		closest_index = np.abs(all_flat_channel_means - input_channel_mean).argmin()
+		print('closest index: ', closest_index)
+		print(all_flat_channel_means[closest_index], input_channel_mean)
+		flat_image_channel = load_flat_img(image_filenames, closest_index, half_images_to_average, channel, bias_img)
+
+		# noise_level = calc_relative_image_noise_level(flat_image_channel)
+		# print('relative noise level of flat: ', noise_level)
+
+	return flat_image_channel
+
 def make_animation():
 	folder = 'F:/2020/2020-04-09/shirt_dusk_flats_progression'
+	bias_img = None
 
-	overall_mean, all_image_means, image_filenames = get_progression_flat_mean(folder)
+	overall_mean, all_image_means, image_filenames = get_progression_flat_mean(folder, bias_img = bias_img)
 
-	if 1:
+	if 0:
 		for channel in range(4):
 			plt.plot(all_image_means[:, channel])
 
@@ -195,19 +271,24 @@ def make_animation():
 			plt.title(str(channel))
 			plt.show()
 
-	if 0:
-		size = (3024, 2012)
+	if 1:
+		size = (3012, 2012)
 		channel_index = 0
 
 		out = cv2.VideoWriter('channel_%d.avi' % channel_index,cv2.VideoWriter_fourcc(*'mp4v'), 15, size, isColor=False)
 
-		image_names = list(filter(lambda s: s.endswith('.ARW'), os.listdir(folder)))#[::10]
+		image_names = list(map(lambda s2: os.path.join(folder, s2), filter(lambda s: s.endswith('.ARW'), os.listdir(folder))))#[::10]
+		image_names = image_names[::-1]
+		# print(image_names)
 
 
+		for i, img_fn in enumerate(tqdm.tqdm(image_names)):
+			if 0:
+				img = histogram_gap.load_raw_image(os.path.join(folder, img_fn), master_dark = bias_img)
+				channel = img[:, :, channel_index]
+			else:
+				channel = load_flat_img(image_names, i, half_images_to_average=7, channel=channel_index, bias_img=bias_img)
 
-		for img_fn in tqdm.tqdm(image_names):
-			img = histogram_gap.read_raw_correct_hist(os.path.join(folder, img_fn))
-			channel = img[:, :, channel_index]
 
 			channel /= overall_mean[:, :, channel_index]
 
@@ -220,24 +301,29 @@ def make_animation():
 
 			channel = np.clip(255*(channel + 0.5), 0, 255).astype(np.uint8)
 
-			print(channel.shape)
 			out.write(channel)	
 
 		out.release()
 
 def get_relative_flat(flats_progression_folder, test_channel, matched_flat_channel, channel_index, bias_img = None):
 	half_images_to_average = 7
-	matching_flat_1 = get_flat_matching_brightness(flats_progression_folder, test_channel, channel_index, bias_img = bias_img, half_images_to_average = half_images_to_average)
-	matching_flat_2 = get_flat_matching_brightness(flats_progression_folder, matched_flat_channel, channel_index, bias_img = bias_img, half_images_to_average = half_images_to_average)
 
-	#todo: center this around 0?
+	# matching_func = get_flat_matching_brightness
+	matching_func = get_flat_matching_brightness_histogram_match
+
+	matching_flat_1 = matching_func(flats_progression_folder, test_channel, channel_index, bias_img = bias_img, half_images_to_average = half_images_to_average)
+	matching_flat_2 = matching_func(flats_progression_folder, matched_flat_channel, channel_index, bias_img = bias_img, half_images_to_average = half_images_to_average)
+
 	#todo: spatial filtering at all?
 	relative_flat = matching_flat_1 / matching_flat_2
+
+	relative_flat = gaussian_filter(relative_flat, mode='nearest', sigma=7)
+	print('blurred relative flat')
 
 	return relative_flat
 
 def show_relative_flats(test_img_path, bias_img = None):
-	test_img = load_raw_image(test_img_path, bias_img) / IMG_MAX
+	test_img = histogram_gap.load_raw_image(test_img_path, bias_img)
 	print(test_img.shape)
 	for channel in range(4):
 
@@ -259,18 +345,16 @@ def show_relative_flats(test_img_path, bias_img = None):
 		display_image(relative_flat)
 		plt.show()
 
-if __name__ == "__main__":
+def test():
 	bias_folder = 'K:/orion_135mm_bothnights/bias'
 	master_bias = load_dark(bias_folder)
 	
-
-	# make_animation()
 	flats_progression_folder = 'F:/2020/2020-04-09/shirt_dusk_flats_progression'
 
 	test_img_path = 'F:/Pictures/Lightroom/2020/2020-02-29/orion_600mm/DSC05669.ARW'
 	show_relative_flats(test_img_path, master_bias)
 
-	test_img = load_raw_image(test_img_path, None) / IMG_MAX
+	test_img = histogram_gap.load_raw_image(test_img_path, None) 
 
 	for channel in range(test_img.shape[-1]):
 		matching_flat = get_flat_matching_brightness(flats_progression_folder, test_img[:, :, channel], channel, half_images_to_average=3)
@@ -295,3 +379,70 @@ if __name__ == "__main__":
 		plt.show()
 
 	print(np.mean(test_img, axis=(0, 1)))
+
+def test2():
+	bias_folder = 'K:/orion_135mm_bothnights/bias'
+	master_bias = load_dark(bias_folder)
+	
+	# flats_progression_folder = 'F:/2020/2020-04-09/shirt_dusk_flats_progression'
+	flats_progression_folder = 'F:/2020/2020-04-11/135mm_sky_flats_progression'
+
+	test_folder = 'F:/2020/2020-04-10/casseiopeia_pano_135mm/3'
+	n_test_images = 3
+
+	test_filenames = list(map(lambda s2: os.path.join(test_folder, s2), filter(lambda s: s.endswith('.ARW'), os.listdir(test_folder))))
+
+	for i in range(0, len(test_filenames), n_test_images):
+		fns = test_filenames[i:i+n_test_images]
+
+		test_imgs = [histogram_gap.load_raw_image(fn, master_bias) for fn in fns]
+
+		mean_test_img = np.mean(test_imgs, axis=0)
+
+		for channel in range(mean_test_img.shape[-1]):
+			test_img_channel = mean_test_img[:, :, channel]
+
+			# matching_flat = get_flat_matching_brightness(flats_progression_folder, test_img_channel, channel, half_images_to_average=7)
+			matching_flat = get_flat_matching_brightness_histogram_match(flats_progression_folder, test_img_channel, channel, half_images_to_average=7)
+			
+			corrected_test_img = test_img_channel / matching_flat
+
+			ratio_range = 0.05
+			ratios = corrected_test_img[np.where(np.abs(corrected_test_img-1) < 0.05)].flatten()
+			
+			def display_image(img, z=1):
+				disp_image = img.copy()
+				disp_image = remove_gradient(disp_image)
+				disp_image = gaussian_filter(disp_image, mode='nearest', sigma=5)
+
+				low = np.percentile(disp_image, z)
+				high = np.percentile(disp_image, 100 - z)
+				disp_image = np.clip(disp_image, low, high)
+				plt.imshow(disp_image)
+
+			plt.subplot(2, 2, 1)
+			display_image(test_img_channel)
+			plt.title('raw test img')
+
+			plt.subplot(2, 2, 2)
+			display_image(matching_flat)
+			plt.title('matching flat')
+
+			plt.subplot(2, 2, 3)
+			display_image(corrected_test_img)
+			plt.title('corrected test img')
+
+			plt.subplot(2, 2, 4)
+			plt.hist(ratios, bins = 1001)
+			plt.grid(True)
+			plt.title('flat : bright ratio img')
+
+			plt.show()
+
+if __name__ == "__main__":
+	
+
+	# make_animation()
+	# test()
+
+	test2()

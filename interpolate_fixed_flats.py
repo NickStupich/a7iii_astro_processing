@@ -61,7 +61,7 @@ def remove_gradient(img, quadratic=False):
 def display_image(i, z=1):
 	disp_image = i.copy()
 
-	# disp_image = remove_gradient(disp_image)
+	disp_image = remove_gradient(disp_image)
 
 	disp_image = gaussian_filter(disp_image, mode='nearest', sigma=5)
 

@@ -7,7 +7,6 @@ import matplotlib.pyplot as plt
 import histogram_gap
 
 
-IMG_MAX = 2**14
 
 def load_dark(folder):
 
@@ -27,7 +26,6 @@ def load_dark(folder):
 			full_fn = os.path.join(folder, fn)
 
 			img = histogram_gap.read_raw_correct_hist(full_fn)
-			# img = (img / IMG_MAX).astype('float32')
 
 			if all_darks is None:
 				all_darks = np.zeros((len(fns),) + img.shape, dtype=img.dtype)
@@ -57,7 +55,7 @@ def flatten_channel_image(img):
 
 	return result
 
-def process_lights_folder(folder, bias_frame):
+def convert_raw_to_lights_folder(folder, bias_frame):
 	print('fixing histograms in folder: ', folder)
 	fns =  list(filter(lambda s: s.endswith('.ARW'), os.listdir(folder)))
 	for fn in tqdm.tqdm(fns):
@@ -77,8 +75,7 @@ def process_lights_folder(folder, bias_frame):
 
 		flat_img = flatten_channel_image(img)
 
-
-		tiff.imwrite(full_fn.rstrip('.ARW') + '_histfix.tif', (flat_img / IMG_MAX).astype('float32'))
+		tiff.imwrite(full_fn.rstrip('.ARW') + '_histfix.tif', flat_img.astype('float32'))
 
 if __name__ == "__main__":
 
@@ -90,9 +87,9 @@ if __name__ == "__main__":
 
 
 	bias_img = load_dark(bias_folder)
-	process_lights_folder(flats_folder, bias_frame = bias_img)
+	convert_raw_to_lights_folder(flats_folder, bias_frame = bias_img)
 
 	exit(0)
 
 	dark_img = load_dark(darks_folder)
-	process_lights_folder(lights_folder, bias_frame = dark_img)
+	convert_raw_to_lights_folder(lights_folder, bias_frame = dark_img)

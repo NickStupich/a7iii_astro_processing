@@ -15,6 +15,7 @@ import astropy
 import astropy.stats
 from sklearn.neighbors import RadiusNeighborsRegressor
 from datetime import datetime
+import cachetools
 
 #don't subtract black level
 #do darks for real black level
@@ -22,6 +23,7 @@ from datetime import datetime
 
 #without black sub: 576, 705, 834, 963, ~1220, ~1484 ....6256
 
+IMG_MAX = 2**14
 
 def fix_channel(channel):
 	first_gap_index = 576
@@ -78,6 +80,21 @@ def read_raw_correct_hist(fn, plot=False):
 			plt.show()
 
 	return out
+
+cache = cachetools.LRUCache(maxsize=32)
+@cachetools.cached(cache=cache, key=lambda *args, **kwargs: cachetools.keys.hashkey(args[0]))
+def load_raw_image(filename, master_dark = None):
+	img = read_raw_correct_hist(filename)
+
+	if master_dark is not None:
+		img -= master_dark
+	else:
+		img -= 512
+		# print('no bias/dark frame')
+
+	img = np.clip(img, 0, np.inf)
+	img /= IMG_MAX
+	return img
 
 if __name__ == "__main__":
 	fn = 'F:/Pictures/Lightroom/2020/2020-02-18/blue_sky_flats/5/DSC03596.ARW'
