@@ -11,7 +11,7 @@ from interpolate_flats import load_gray_tiff, extract_channel_image, flatten_cha
 from interpolate_fixed_flats import get_exposure_matched_flat, display_image, remove_gradient
 from load_flats import load_flats_from_subfolders
 import full_flat_sequence
-
+import subimg_full_flat_sequence
 
 def calc_relative_image_noise_level(img):
 	img_mean = np.mean(img)
@@ -68,7 +68,7 @@ for each light frame:
 	integrate
 	"""
 	if 0:
-		lights_in_folder = 'K:/orion_135mm_bothnights/lights_in'
+		lights_in_folder = 'K:/orion_135mm_bothnights/lights_in_partial'
 
 		darks_folder = 'K:/orion_135mm_bothnights/darks'
 		bias_folder = 'K:/orion_135mm_bothnights/bias'
@@ -90,13 +90,14 @@ for each light frame:
 		flats_progression_folder = 'F:/2020/2020-04-09/shirt_dusk_flats_progression'
 
 		calibrated_lights_out_folder = 'K:/flame_horsehead_600mm/lights_out_flat_sequence'
-	elif 1:
+	elif 0:
 		lights_in_folder = 'F:/Pictures/Lightroom/2020/2020-02-29/orion_600mm'
 
 		darks_folder = 'F:/Pictures/Lightroom/2020/2020-02-19/darks'
 		bias_folder = 'F:/Pictures/Lightroom/2020/2020-02-19/bias'
 		flats_progression_folder = 'F:/2020/2020-04-09/shirt_dusk_flats_progression'
 		
+		flats_folder = 'F:/Pictures/Lightroom/2020/2020-02-29/flats'
 		flats_folder = 'F:/Pictures/Lightroom/2020/2020-02-29/flats'
 		# flats_folder = 'F:/2020/2020-04-07/flats_600mm'
 
@@ -151,7 +152,7 @@ for each light frame:
 
 		calibrated_lights_out_folder = 'K:/leo_triplet_600mm/lights_out'
 
-	elif 1:
+	elif 0:
 
 		lights_in_folder = 'F:/Pictures/Lightroom/2020_2018/2018-02-01/andromeda_600mm'
 
@@ -163,7 +164,7 @@ for each light frame:
 
 		calibrated_lights_out_folder = 'K:/andromeda_600mm/lights_out'
 
-	else:
+	elif 0:
 		darks_folder = 'F:/Pictures/Lightroom/2020/2020-03-07/darks_135mm_30s_iso100'
 		bias_folder = 'F:/Pictures/Lightroom/2020/2020-03-07/bias_135mm_iso100'
 		flats_progression_folder = 'F:/2020/2020-04-11/135mm_sky_flats_progression'
@@ -171,7 +172,17 @@ for each light frame:
 
 		lights_in_folder = 'F:/2020/2020-04-12/coma_cluster_135mm'
 		calibrated_lights_out_folder = 'K:/coma_cluster_135mm/lights_out'
+	
+	elif 1:
+		lights_in_folder = 'F:/Pictures/Lightroom/2020/2020-02-20/pleiades'
 
+		darks_folder = 'F:/Pictures/Lightroom/2020/2020-02-19/darks'
+		bias_folder = 'F:/2020/2020-04-17/bias_iso800'
+		flats_progression_folder = 'F:/2020/2020-04-09/shirt_dusk_flats_progression'
+		
+		flats_folder = 'F:/Pictures/Lightroom/2020/2020-02-20/pleiades_flats'
+
+		calibrated_lights_out_folder = 'Z:/astro_processing/pleiades/lights_pleiades_flats'
 
 	#Todo: make smarter mean. also cache
 	master_dark = load_dark(darks_folder)
@@ -189,34 +200,25 @@ for each light frame:
 	for filename in tqdm.tqdm(filenames):
 		full_path = os.path.join(lights_in_folder, filename)
 		output_path = os.path.join(calibrated_lights_out_folder, filename.rstrip('.ARW') + '.tif')
-
 		# if os.path.exists(output_path): continue
 
 		img_minus_dark = histogram_gap.load_raw_image(full_path, master_dark)
-
-
 		img_minus_dark_rgb = np.transpose(img_minus_dark, (2, 0, 1))
 
-		# for channel in range(4):
-		# 	plt.imshow(img_minus_dark_rgb[channel, 1990//2:2010//2, 2990//2:3010//2])
-		# 	plt.show()
-
-		print(img_minus_dark.shape, img_minus_dark_rgb.shape)
-
-		# print(img_minus_dark_rgb.shape)
 		if 0:
 			calibrated_flat_img_rgb, exposure_index = get_exposure_matched_flat(flat_images_rgb, img_minus_dark_rgb)
-		elif 1:
+		elif 0:
 			calibrated_flat_img_rgb = full_flat_sequence.get_flat_and_bandingfix_flat(flat_images_rgb, img_minus_dark_rgb, flats_progression_folder, master_bias)
+		elif 0:
+			calibrated_flat_img_rgb = subimg_full_flat_sequence.get_subimg_matched_flat2(flat_images_rgb, img_minus_dark_rgb, flats_progression_folder, master_bias)
+		elif 1:
+			calibrated_flat_img_rgb = subimg_full_flat_sequence.get_flat_and_subimg_matched_flat(flat_images_rgb, img_minus_dark_rgb, flats_progression_folder, master_bias)
 		else:
 			calibrated_flat_img_rgb = 1
 
 		if calibrated_flat_img_rgb is None: 
 			print("***Failed to find matching flat")
 			continue
-		# print('exposure index: ', exposure_index)
-
-		# print('calibrated flat img rgb mean: ', np.mean(calibrated_flat_img_rgb, axis=(1,2)))
 
 		calibrated_img_rgb = img_minus_dark_rgb / calibrated_flat_img_rgb
 		# calibrated_img_rgb = img_minus_dark_rgb
@@ -228,21 +230,5 @@ for each light frame:
 
 		# exit(0)
 
-
-
 if __name__ == "__main__":
 	main()
-
-
-	"""todo: 
-		tighter spaced flat frames
-			automatic stacking & cal of flat frames
-
-		caching throughout
-
-		power lines removal/python stacking
-		horizontal banding reduction. pre-registering. fix in flats??? visible in fft @ freq=670/1000 (0.5 * vertical resolution)  python vs pixinsight?
-		
-
-
-	"""

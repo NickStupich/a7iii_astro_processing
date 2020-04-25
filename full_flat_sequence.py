@@ -73,19 +73,18 @@ def get_progression_flat_mean(folder, bias_img = None):
 	image_names = list(map(lambda s2: os.path.join(folder, s2), filter(lambda s: s.endswith('.ARW'), os.listdir(folder))))
 
 	#is this ok in general? probably?
-	def sortKey(s):
-		result = int(s.split(os.path.sep)[-1].strip('DSC').split('.')[-2])
-		if result > 9000: result -= 10000
-		return result
+	# def sortKey(s):
+	# 	result = int(s.split(os.path.sep)[-1].strip('DSC').split('.')[-2])
+	# 	if result > 9000: result -= 10000
+	# 	return result
 
-	image_names.sort(key = sortKey)
+	# image_names.sort(key = sortKey)
 	# print(image_names)
 
 	if os.path.exists(cache_name):# and False:
 		sum_image = tiff.imread(cache_name)
 		all_image_means = np.load(means_cache_name)
-		plt.plot(all_image_means)
-		plt.show()
+
 	else:
 
 		sum_image = None
@@ -108,7 +107,8 @@ def get_progression_flat_mean(folder, bias_img = None):
 
 		sum_image /= len(image_names)
 		all_image_means = np.array(all_image_means)
-
+		# plt.plot(all_image_means)
+		# plt.show()
 		tiff.imwrite(cache_name, sum_image)
 		np.save(means_cache_name, all_image_means)
 

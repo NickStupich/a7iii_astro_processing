@@ -18,6 +18,9 @@ from interpolate_fixed_flats import display_image, remove_gradient
 from load_flats import load_flats_from_subfolders
 import full_flat_sequence
 
+# cache_base = 'K:/cache/135mm'
+cache_base = 'K:/cache/600mm'
+
 def make_animation():
 	folder = 'F:/2020/2020-04-09/shirt_dusk_flats_progression'
 	bias_img = None
@@ -82,7 +85,7 @@ def load_channel_progression(folder, bias_img, downsize_factor, channel_index):
 	print('# flat images: ', len(image_names))
 	# print(image_names)
 
-	cache_filename = 'K:/cache/flat_channel_cache%d_%d.npy' % (channel_index, downsize_factor)
+	cache_filename = cache_base + '/flat_channel_cache%d_%d.npy' % (channel_index, downsize_factor)
 
 	if not os.path.exists(cache_filename):
 		channel_cache = None
@@ -119,9 +122,11 @@ def load_channel_progression(folder, bias_img, downsize_factor, channel_index):
 
 	return channel_cache
 
-def load_channel_progression_brightness_filtered(folder, bias_img, downsize_factor, channel_index, num_images_to_avg = 5):
+# cache = cachetools.LRUCache(maxsize=32)
+# @cachetools.cached(cache=cache, key=lambda folder, bias_img, downsize_factor, channel_index, num_images_to_avg: cachetools.keys.hashkey(folder, downsize_factor, channel_index, num_images_to_avg))
+def load_channel_progression_brightness_filtered(folder, bias_img, downsize_factor, channel_index, num_images_to_avg):
 
-	cache_filename = 'K:/cache/filtered_%d_flat_channel_cache%d_%d.npy' % (num_images_to_avg, channel_index, downsize_factor)
+	cache_filename = cache_base + '/filtered_%d_flat_channel_cache%d_%d.npy' % (num_images_to_avg, channel_index, downsize_factor)
 
 	if not os.path.exists(cache_filename):
 		channel = load_channel_progression(folder, bias_img, downsize_factor, channel_index)
@@ -143,15 +148,36 @@ def load_channel_progression_brightness_filtered(folder, bias_img, downsize_fact
 		print('done', (datetime.datetime.now() - start))
 		print(channel.shape)
 
-	return channel
+	return channel, np.mean(channel, axis=(1,2))
 
+def load_channel_progression_brightness_filtered_spatialfiltered(folder, bias_img, downsize_factor, channel_index, num_images_to_avg, spatial_sigma_raw = 10):
 
-def test_flatten_image():
+	cache_filename = cache_base + '/filtered_%d_flat_channel_cache%d_%d_spatial_filter%d.npy' % (num_images_to_avg, channel_index, downsize_factor, spatial_sigma_raw)
+
+	if not os.path.exists(cache_filename):
+		channel, _ = load_channel_progression_brightness_filtered(folder, bias_img, downsize_factor, channel_index, num_images_to_avg)
+
+		print('spatial filtering channel')
+		for ti in tqdm.tqdm(range(channel.shape[0])):
+			channel[ti] = gaussian_filter(channel[ti], sigma = spatial_sigma_raw / downsize_factor)
+
+		np.save(cache_filename, channel)
+
+	else:
+		print('loading from cache file...')
+		start = datetime.datetime.now()
+		channel = np.load(cache_filename)
+		print('done', (datetime.datetime.now() - start))
+		print(channel.shape)
+
+	return channel, np.mean(channel, axis=(1,2))
+
+def test_flatten_channel():
 	# folder = 'F:/2020/2020-04-09/shirt_dusk_flats_progression'
 	folder = 'F:/2020/2020-04-11/135mm_sky_flats_progression'
 	bias_folder = 'K:/orion_135mm_bothnights/bias'
 	bias_img = load_dark(bias_folder)
-	downsize_factor = 1
+	downsize_factor = 4
 	channel_index = 0
 
 	test_img_path = 'F:/Pictures/Lightroom/2020/2020-02-18/orion_135mm/DSC03637.ARW'
@@ -161,10 +187,9 @@ def test_flatten_image():
 
 	#todo: spatial and temporal filtering
 	# channel_progression = load_channel_progression(folder, bias_img, downsize_factor, channel_index)
-	channel_progression = load_channel_progression_brightness_filtered(folder, bias_img, downsize_factor, channel_index)
-
-	image_means = np.mean(channel_progression, axis=(1,2))
-
+	# channel_progression, image_means = load_channel_progression_brightness_filtered(folder, bias_img, downsize_factor, channel_index, num_images_to_avg=5)
+	channel_progression, image_means = load_channel_progression_brightness_filtered_spatialfiltered(folder, bias_img, downsize_factor, channel_index, num_images_to_avg=5)
+	
 	channel_flat = np.zeros_like(test_img_channel)
 
 	print(test_img_channel.shape, channel_progression.shape, channel_flat.shape)
@@ -174,7 +199,7 @@ def test_flatten_image():
 			for xi in range(test_img_channel.shape[1]):
 				input_pixel = test_img_channel[yi,xi]
 
-				progression = channel_progression[:, yi, xi]
+				progression = channel_progression[:, yi//downsize_factor, xi//downsize_factor]
 
 				index = np.argmin(np.abs(progression - input_pixel))
 				
@@ -195,8 +220,14 @@ def test_flatten_image():
 
 				channel_flat[yi,xi] = output 
 		else:
+			# input_pixels = test_img_channel[yi]
+
 			input_pixels = test_img_channel[yi]
-			progressions = channel_progression[:, yi, :]
+			input_pixels = input_pixels.reshape((input_pixels.shape[0]//downsize_factor, downsize_factor)).mean(1)
+
+
+
+			progressions = channel_progression[:, yi//downsize_factor, :]
 			indices = np.argmin(np.abs(progressions - input_pixels), axis=0)
 			# print('indices: ', indices.shape)
 			# print('progressions: ', progressions.shape)
@@ -216,7 +247,7 @@ def test_flatten_image():
 				output = progressions[indices[i], i] / image_means[indices[i]]
 				outputs[i] = output
 
-			channel_flat[yi] = outputs
+			channel_flat[yi] = np.repeat(outputs, downsize_factor)
 
 			# print(channel_flat[yi, :10], outputs[:10])
 			# exit(0)
@@ -256,7 +287,7 @@ def test1():
 	folder = 'F:/2020/2020-04-11/135mm_sky_flats_progression'
 	bias_folder = 'K:/orion_135mm_bothnights/bias'
 	bias_img = load_dark(bias_folder)
-	downsize_factor = 1
+	downsize_factor = 4
 	channel_index = 0
 
 	channel = load_channel_progression(folder, bias_img, downsize_factor, channel_index)
@@ -327,43 +358,246 @@ def test1():
 	plt.grid(True)
 	plt.show()
 
+def process_row(input_pixels, progressions, channel_means):
 
-def test2():
+	indices = np.argmin(np.abs(progressions - input_pixels), axis=0)
+
+	outputs = np.zeros((len(indices)), dtype=np.float32)
+	for i in range(indices.shape[0]):
+		output = progressions[indices[i], i] / channel_means[indices[i]]
+		outputs[i] = output
+
+	return outputs
+
+from numba import jit
+
+@jit(nopython=True, parallel=True)
+def process_row2(input_pixels, progressions, channel_means):
+	indices = np.array([np.argmin(np.abs(progressions[:, xi] - input_pixels[xi])) for xi in range(len(input_pixels))])
+
+	outputs = np.zeros((len(indices)), dtype=np.float32)
+	for i in range(indices.shape[0]):
+		output = progressions[indices[i], i] / channel_means[indices[i]]
+		outputs[i] = output
+
+	return outputs
+
+
+all_channel_progression = None
+all_channel_means = None
+
+def load_all_channels(flats_progression_folder, bias_img, downsize_factor):
+	global all_channel_progression
+	global all_channel_means
+
+	for channel_index in range(4):
+		# channel_progression, channel_means = load_channel_progression_brightness_filtered(flats_progression_folder, bias_img, downsize_factor, channel_index, num_images_to_avg=5)
+		channel_progression, channel_means = load_channel_progression_brightness_filtered_spatialfiltered(flats_progression_folder, bias_img, downsize_factor, channel_index, num_images_to_avg=5)
+		if all_channel_progression is None:
+			all_channel_progression = np.zeros((4,) + channel_progression.shape, dtype=channel_progression.dtype)
+			all_channel_means = np.zeros((4,) + channel_means.shape, dtype=channel_means.dtype)
+
+		all_channel_progression[channel_index] = channel_progression
+		all_channel_means[channel_index] = channel_means
+
+def get_subimg_matched_flat(flat_images_rgb, img_rgb, flats_progression_folder, bias_img, downsize_factor=4):
+	#TODO: double flat matching with flat_images_rgb?
+	# global all_channel_progression
+	# global all_channel_means
+
+	output_flat = np.zeros_like(img_rgb)
+
+	for channel_index in range(img_rgb.shape[0]):
+		# channel_progression, channel_means = load_channel_progression_brightness_filtered(flats_progression_folder, bias_img, downsize_factor, channel_index, num_images_to_avg=5)
+		channel_progression, channel_means = load_channel_progression_brightness_filtered_spatialfiltered(flats_progression_folder, bias_img, downsize_factor, channel_index, num_images_to_avg=5)
+		
+		test_img_channel = img_rgb[channel_index]
+
+		for yi in tqdm.tqdm(range(test_img_channel.shape[0])):
+		
+			input_pixels = test_img_channel[yi]
+			input_pixels = input_pixels.reshape((input_pixels.shape[0]//downsize_factor, downsize_factor)).mean(1)
+
+			progressions = channel_progression[:, yi//downsize_factor, :]
+			
+			outputs = process_row(input_pixels, progressions, channel_means)
+
+			output_flat[channel_index, yi] = np.repeat(outputs, downsize_factor)
+
+	return output_flat
+
+def calc_flat_image_means(flat_images_rgb, proportiontocut = 0.2):
+	proportiontocut = 0.2
+
+	flat_image_means = np.mean(flat_images_rgb, axis=(2, 3))
+	print('flat image means: ', flat_image_means)
+
+	if 1:
+		for channel in range(flat_images_rgb.shape[0]):
+			for img in range(flat_images_rgb.shape[1]):
+				flat_image_means[channel, img] = scipy.stats.trim_mean(flat_images_rgb[channel, img].flatten(), proportiontocut = proportiontocut)
+
+		print('flat image means: ', flat_image_means)
+
+	return flat_image_means
+
+flat_image_means = None
+def get_flat_and_subimg_matched_flat(flat_images_rgb, test_img_rgb, flats_progression_folder, bias_img = None):
+
+	proportiontocut = 0.2
+	global flat_image_means
+	if flat_image_means is None:
+		flat_image_means = calc_flat_image_means(flat_images_rgb, proportiontocut)
+
+	daily_flat = np.zeros_like(test_img_rgb)
+	for channel in range(test_img_rgb.shape[0]):
+		# output_flat[channel] = 1; continue
+		# print('starting channel ', channel)
+		test_img_channel_mean = scipy.stats.trim_mean(test_img_rgb[channel].flatten(), proportiontocut = proportiontocut)
+		# print('test img mean: ', test_img_channel_mean)
+		# print(flat_image_means[:, channel] - test_img_channel_mean)
+		closest_flat_index = np.abs(flat_image_means[:, channel] - test_img_channel_mean).argmin()
+
+		# print('closest flat index: ', closest_flat_index)
+
+		daily_flat[channel] = flat_images_rgb[closest_flat_index, channel, :, :]
+
+	daily_flat_progression_flat = get_subimg_matched_flat2(None, daily_flat, flats_progression_folder, bias_img)
+	test_img_progression_flat = get_subimg_matched_flat2(None, test_img_rgb, flats_progression_folder, bias_img)
+
+	output_flat = test_img_progression_flat * daily_flat / daily_flat_progression_flat
+
+	return output_flat
+
+def get_subimg_matched_flat2(flat_images_rgb, img_rgb, flats_progression_folder, bias_img, downsize_factor=4):
+	#TODO: double flat matching with flat_images_rgb?
+	global all_channel_progression
+	global all_channel_means
+
+	if all_channel_progression is None:
+		load_all_channels(flats_progression_folder, bias_img, downsize_factor)
+
+	output_flat = np.zeros_like(img_rgb)
+
+	for channel_index in range(img_rgb.shape[0]):
+		channel_progression = all_channel_progression[channel_index]
+		channel_means = all_channel_means[channel_index]
+		test_img_channel = img_rgb[channel_index]
+
+		# for yi in tqdm.tqdm(range(test_img_channel.shape[0])):
+		for yi in range(test_img_channel.shape[0]):
+		
+			input_pixels = test_img_channel[yi]
+			input_pixels = input_pixels.reshape((input_pixels.shape[0]//downsize_factor, downsize_factor)).mean(1)
+
+			progressions = channel_progression[:, yi//downsize_factor, :]
+
+
+			outputs = process_row2(input_pixels, progressions, channel_means)
+
+
+			output_flat[channel_index, yi] = np.repeat(outputs, downsize_factor)
+
+	return output_flat
+
+def test_get_flat():
+	# folder = 'F:/2020/2020-04-09/shirt_dusk_flats_progression'
+	folder = 'F:/2020/2020-04-11/135mm_sky_flats_progression'
 	bias_folder = 'K:/orion_135mm_bothnights/bias'
-	master_bias = load_dark(bias_folder)
+	bias_img = load_dark(bias_folder)
+	downsize_factor = 4
+
+	test_img_path = 'F:/Pictures/Lightroom/2020/2020-02-18/orion_135mm/DSC03637.ARW'
 	
-	flats_progression_folder = 'F:/2020/2020-04-09/shirt_dusk_flats_progression'
+	test_img = histogram_gap.load_raw_image(test_img_path, bias_img) 
 
-	test_img_path = 'F:/Pictures/Lightroom/2020/2020-02-29/orion_600mm/DSC05669.ARW'
-	show_relative_flats(test_img_path, master_bias)
 
-	test_img = histogram_gap.load_raw_image(test_img_path, None) 
+	test_img = np.transpose(test_img, (2, 0, 1))
 
-	for channel in range(test_img.shape[-1]):
-		matching_flat = get_flat_matching_brightness(flats_progression_folder, test_img[:, :, channel], channel, half_images_to_average=3)
+	flat = get_subimg_matched_flat(None, test_img, folder, bias_img)
 
-		plt.subplot(2, 2, 1)
-		display_image(test_img[:, :, channel])
-		plt.title('test img')
+	for channel_index in range(4):
+		print('testing channel ', channel_index)
+		channel_flat = flat[channel_index]
+		test_img_channel = test_img[channel_index]
 
-		plt.subplot(2, 2, 2)
-		display_image(matching_flat)
-		plt.title('matching flat')
-
-		ratios = (test_img[:, :, channel] / matching_flat).flatten()
-
-		plt.subplot(2, 2, 3)
-		bin_range = 0.1
-		bins = np.linspace(1 - bin_range, 1+bin_range, 1000)
-		plt.hist(ratios, bins = bins)
-		plt.yscale('log', nonposy='clip')
-		plt.grid(True)
-
+		plt.imshow(channel_flat)
+		plt.title('channel flat')
 		plt.show()
 
-	print(np.mean(test_img, axis=(0, 1)))
+		calibrated_img = test_img_channel / channel_flat
+
+		plt.imshow(test_img_channel)
+		plt.title('test img')
+		plt.show()
+
+		plt.imshow(calibrated_img)
+		plt.title('calibrated test img')
+		plt.show()
+
+		# plt.hist(calibrated_img.flatten(), bins = 1000)
+		# plt.show()
+
+		benchmark_flat = full_flat_sequence.get_flat_matching_brightness_histogram_match(folder, test_img_channel, channel_index, bias_img = bias_img, half_images_to_average = 5)
+
+		plt.imshow(benchmark_flat)
+		plt.title('benchmark')
+		plt.show()
+
+		benchmark_ratio = channel_flat / benchmark_flat
+		plt.title('difference v benchmark')
+		plt.imshow(benchmark_ratio)
+		plt.show()
+
+def test_get_flat_faster():
+	folder = 'F:/2020/2020-04-11/135mm_sky_flats_progression'
+	bias_folder = 'K:/orion_135mm_bothnights/bias'
+	bias_img = load_dark(bias_folder)
+	downsize_factor = 4
+
+	test_img_path = 'F:/Pictures/Lightroom/2020/2020-02-18/orion_135mm/DSC03637.ARW'
+	
+	test_img = histogram_gap.load_raw_image(test_img_path, bias_img) 
+
+
+	test_img = np.transpose(test_img, (2, 0, 1))
+
+	# resize = 4
+	# test_img = test_img[0:1, :test_img.shape[1]//(resize*downsize_factor) * downsize_factor, :test_img.shape[2]//(resize*downsize_factor) * downsize_factor]
+	# test_img = test_img[0:1]
+	print('test_img: ', test_img.shape)
+
+	# for channel_index in range(test_img.shape[0]):
+	# 	channel_progression, channel_means = load_channel_progression_brightness_filtered(folder, bias_img, downsize_factor, channel_index, num_images_to_avg=5)
+	
+	load_all_channels(folder, bias_img, downsize_factor)
+
+	start = datetime.datetime.now()
+	flat_new = get_subimg_matched_flat2(None, test_img, folder, bias_img)
+	print('new time: ', (datetime.datetime.now() - start))
+
+	if 1:
+		start = datetime.datetime.now()
+		flat_reference = get_subimg_matched_flat(None, test_img, folder, bias_img)
+		print('reference time: ', (datetime.datetime.now() - start))
+
+		if np.all(flat_new == flat_reference):
+			print('ALL GOOD!')
+
+		else:
+			print('***not equal***')
+			avg_diff = np.mean(np.abs(flat_new - flat_reference) / flat_reference)
+			print('average relative difference: ', avg_diff)
+			ratio = (flat_new / flat_reference)[0]
+			plt.imshow(ratio)
+			plt.show()
 
 
 if __name__ == "__main__":
 	# test1()
-	test_flatten_image()
+	test_flatten_channel()
+	# test_get_flat()
+	# test_get_flat_faster()
+
+	# import cProfile
+	# cProfile.run('test_get_flat_faster()')
