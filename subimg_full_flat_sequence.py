@@ -18,8 +18,9 @@ from interpolate_fixed_flats import display_image, remove_gradient
 from load_flats import load_flats_from_subfolders
 import full_flat_sequence
 
-# cache_base = 'K:/cache/135mm'
-cache_base = 'K:/cache/600mm'
+#todo: put this in the progression flats folder?
+cache_base = 'K:/cache/135mm'
+# cache_base = 'K:/cache/600mm'
 
 def make_animation():
 	folder = 'F:/2020/2020-04-09/shirt_dusk_flats_progression'
@@ -88,6 +89,7 @@ def load_channel_progression(folder, bias_img, downsize_factor, channel_index):
 	cache_filename = cache_base + '/flat_channel_cache%d_%d.npy' % (channel_index, downsize_factor)
 
 	if not os.path.exists(cache_filename):
+		print('no cache file...')
 		channel_cache = None
 
 		for i, img_fn in enumerate(tqdm.tqdm(image_names)):
@@ -382,7 +384,6 @@ def process_row2(input_pixels, progressions, channel_means):
 
 	return outputs
 
-
 all_channel_progression = None
 all_channel_means = None
 
@@ -465,12 +466,15 @@ def get_flat_and_subimg_matched_flat(flat_images_rgb, test_img_rgb, flats_progre
 	daily_flat_progression_flat = get_subimg_matched_flat2(None, daily_flat, flats_progression_folder, bias_img)
 	test_img_progression_flat = get_subimg_matched_flat2(None, test_img_rgb, flats_progression_folder, bias_img)
 
+	#todo: normalize somehow
 	output_flat = test_img_progression_flat * daily_flat / daily_flat_progression_flat
+
+	for channel in range(test_img_rgb.shape[0]):
+		output_flat[channel] /= np.mean(output_flat[channel])
 
 	return output_flat
 
 def get_subimg_matched_flat2(flat_images_rgb, img_rgb, flats_progression_folder, bias_img, downsize_factor=4):
-	#TODO: double flat matching with flat_images_rgb?
 	global all_channel_progression
 	global all_channel_means
 
@@ -591,7 +595,6 @@ def test_get_flat_faster():
 			ratio = (flat_new / flat_reference)[0]
 			plt.imshow(ratio)
 			plt.show()
-
 
 if __name__ == "__main__":
 	# test1()

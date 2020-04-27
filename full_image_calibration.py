@@ -12,6 +12,7 @@ from interpolate_fixed_flats import get_exposure_matched_flat, display_image, re
 from load_flats import load_flats_from_subfolders
 import full_flat_sequence
 import subimg_full_flat_sequence
+import pixinsight_preprocess
 
 def calc_relative_image_noise_level(img):
 	img_mean = np.mean(img)
@@ -67,16 +68,15 @@ for each light frame:
 	register
 	integrate
 	"""
-	if 0:
-		lights_in_folder = 'K:/orion_135mm_bothnights/lights_in_partial'
+	if 1:
+		lights_in_folder = 'K:/orion_135mm_bothnights/lights_in'
 
 		darks_folder = 'K:/orion_135mm_bothnights/darks'
 		bias_folder = 'K:/orion_135mm_bothnights/bias'
 
-		calibrated_lights_out_folder = 'K:/orion_135mm_bothnights/lights_out'
+		output_folder = 'K:/orion_135mm_bothnights2'
 		# flats_folder = 'F:/2020/2020-04-06/blue_sky_flats'
 		flats_folder = 'F:/Pictures/Lightroom/2020/2020-02-18/blue_sky_flats'
-
 
 		flats_progression_folder = 'F:/2020/2020-04-09/shirt_dusk_flats_progression'
 	elif 0:
@@ -94,10 +94,9 @@ for each light frame:
 		lights_in_folder = 'F:/Pictures/Lightroom/2020/2020-02-29/orion_600mm'
 
 		darks_folder = 'F:/Pictures/Lightroom/2020/2020-02-19/darks'
-		bias_folder = 'F:/Pictures/Lightroom/2020/2020-02-19/bias'
+		bias_folder = 'F:/2020/2020-04-17/bias_iso800'
 		flats_progression_folder = 'F:/2020/2020-04-09/shirt_dusk_flats_progression'
 		
-		flats_folder = 'F:/Pictures/Lightroom/2020/2020-02-29/flats'
 		flats_folder = 'F:/Pictures/Lightroom/2020/2020-02-29/flats'
 		# flats_folder = 'F:/2020/2020-04-07/flats_600mm'
 
@@ -138,8 +137,6 @@ for each light frame:
 		flats_progression_folder = 'F:/2020/2020-04-11/135mm_sky_flats_progression'		
 
 		calibrated_lights_out_folder = 'K:/coma_135mm_f4/lights'
-
-
 	elif 0:
 
 		lights_in_folder = 'F:/2020/2020-04-15/leo_triplet_600mm'
@@ -151,7 +148,6 @@ for each light frame:
 		flats_folder = 'F:/2020/2020-04-15/flats'
 
 		calibrated_lights_out_folder = 'K:/leo_triplet_600mm/lights_out'
-
 	elif 0:
 
 		lights_in_folder = 'F:/Pictures/Lightroom/2020_2018/2018-02-01/andromeda_600mm'
@@ -163,7 +159,6 @@ for each light frame:
 		flats_folder = 'F:/Pictures/Lightroom/2020_2018/2018-02-01/flats_600mm'
 
 		calibrated_lights_out_folder = 'K:/andromeda_600mm/lights_out'
-
 	elif 0:
 		darks_folder = 'F:/Pictures/Lightroom/2020/2020-03-07/darks_135mm_30s_iso100'
 		bias_folder = 'F:/Pictures/Lightroom/2020/2020-03-07/bias_135mm_iso100'
@@ -172,8 +167,7 @@ for each light frame:
 
 		lights_in_folder = 'F:/2020/2020-04-12/coma_cluster_135mm'
 		calibrated_lights_out_folder = 'K:/coma_cluster_135mm/lights_out'
-	
-	elif 1:
+	elif 0:
 		lights_in_folder = 'F:/Pictures/Lightroom/2020/2020-02-20/pleiades'
 
 		darks_folder = 'F:/Pictures/Lightroom/2020/2020-02-19/darks'
@@ -183,6 +177,22 @@ for each light frame:
 		flats_folder = 'F:/Pictures/Lightroom/2020/2020-02-20/pleiades_flats'
 
 		calibrated_lights_out_folder = 'Z:/astro_processing/pleiades/lights_pleiades_flats'
+	elif 1:
+		darks_folder = 'K:/orion_135mm_bothnights/darks'
+		bias_folder = 'K:/orion_135mm_bothnights/bias'
+		flats_progression_folder = 'F:/2020/2020-04-11/135mm_sky_flats_progression'		
+		flats_folder = 'F:/2020/2020-04-22/24mm_flats'
+
+		# lights_in_folder = 'F:/2020/2020-04-11/rice_lake_nightscape/tracked'
+		# calibrated_lights_out_folder = 'K:/rice_lake/tracked_lights'
+
+		lights_in_folder = 'F:/2020/2020-04-11/rice_lake_nightscape/untracked'
+		calibrated_lights_out_folder = 'K:/rice_lake/untracked_lights'
+
+
+	if not os.path.exists(output_folder): os.mkdir(output_folder)
+	calibrated_lights_out_folder = os.path.join(output_folder, 'calibrated')
+	if not os.path.exists(calibrated_lights_out_folder): os.mkdir(calibrated_lights_out_folder)
 
 	#Todo: make smarter mean. also cache
 	master_dark = load_dark(darks_folder)
@@ -194,7 +204,7 @@ for each light frame:
 	print(flat_images.shape, flat_images_rgb.shape)
 
 
-	filenames = list(filter(lambda s: s.endswith('.ARW'), os.listdir(lights_in_folder)))
+	filenames = list(filter(lambda s: s.endswith('.ARW'), os.listdir(lights_in_folder)))[:7]
 	print('number of lights: ', len(filenames))
 
 	for filename in tqdm.tqdm(filenames):
@@ -221,14 +231,20 @@ for each light frame:
 			continue
 
 		calibrated_img_rgb = img_minus_dark_rgb / calibrated_flat_img_rgb
+		calibrated_img_rgb = np.clip(calibrated_img_rgb, 0, 1)
 		# calibrated_img_rgb = img_minus_dark_rgb
 
-		print('calibrated rgb: ', calibrated_img_rgb.shape)
+		# print('calibrated rgb: ', calibrated_img_rgb.shape)
 		calibrated_img = flatten_channel_image(calibrated_img_rgb)
 
 		tiff.imwrite(output_path, calibrated_img.astype('float32'))
 
 		# exit(0)
+
+	pi_script_path = pixinsight_preprocess.create_pixinsight_preprocess_script(output_folder, calibrated_lights_out_folder, filenames)
+	cmd = '"C:/Program Files/PixInsight/bin/PixInsight.exe" --run=%s' % pi_script_path
+
+	os.system(cmd)
 
 if __name__ == "__main__":
 	main()
